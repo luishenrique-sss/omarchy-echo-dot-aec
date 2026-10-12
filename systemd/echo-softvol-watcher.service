@@ -1,0 +1,15 @@
+[Unit]
+Description=Echo Dot soft-volume auto-wiring daemon
+After=pipewire.service pipewire-pulse.service wireplumber.service
+PartOf=graphical-session.target
+
+[Service]
+# Troque pelo MAC do seu alto-falante Bluetooth
+Environment=BT_MAC=AA:BB:CC:DD:EE:FF
+Type=simple
+ExecStart=%h/.local/bin/echo-softvol-watch
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

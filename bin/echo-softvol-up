@@ -1,0 +1,96 @@
+#!/bin/bash
+set -euo pipefail
+
+BT_MAC="${BT_MAC:-AA:BB:CC:DD:EE:FF}"   # MAC do seu alto-falante (bluetoothctl devices)
+MAC_UNDERSCORE="${BT_MAC//:/_}"
+CARD="bluez_card.${MAC_UNDERSCORE}"
+
+# Prevent concurrent runs (watcher + manual) from creating duplicate sinks
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/echo-softvol.lock"
+flock 9
+
+teardown() {
+  pkill -f 'pipewire -c .*echo-softvol/aec.conf' 2>/dev/null || true
+  # Drop any leftover echo-cancel modules (from earlier experiments)
+  while read -r mid; do
+    [ -n "$mid" ] && pactl unload-module "$mid" 2>/dev/null || true
+  done < <(pactl list short modules | awk '/module-echo-cancel/ {print $1}')
+
+  # Drop orphan loopbacks
+  while read -r mid; do
+    [ -n "$mid" ] && pactl unload-module "$mid" 2>/dev/null || true
+  done < <(pactl list short modules | awk -v pat="echo_softvol|${MAC_UNDERSCORE}" '$0 ~ /module-loopback/ && $0 ~ pat {print $1}')
+
+  # Drop softvol null-sink
+  while read -r mid; do
+    [ -n "$mid" ] && pactl unload-module "$mid" 2>/dev/null || true
+  done < <(pactl list short modules | awk '/module-null-sink/ && /echo_softvol/ {print $1}')
+}
+
+if [[ "${1:-}" == "down" || "${1:-}" == "stop" ]]; then
+  teardown
+  exit 0
+fi
+
+if [[ "${1:-}" == "connect" ]]; then
+  bluetoothctl connect "$BT_MAC" || true
+fi
+
+teardown
+
+# Wait for BT sink to appear (up to 15 seconds)
+BT_SINK=""
+for _ in $(seq 1 30); do
+  BT_SINK=$(pactl list short sinks | awk -v mac="$MAC_UNDERSCORE" '$2 ~ mac {print $2; exit}')
+  if [ -n "$BT_SINK" ]; then
+    break
+  fi
+  sleep 0.5
+done
+
+if [ -z "$BT_SINK" ]; then
+  exit 1
+fi
+
+# Ensure card profile is a2dp-sink if card exists
+if pactl list short cards | grep -q "$CARD"; then
+  pactl set-card-profile "$CARD" a2dp-sink 2>/dev/null || true
+fi
+
+# Set BT hardware sink to 100% unmuted so software volume on Echo sink controls actual loudness
+pactl set-sink-volume "$BT_SINK" 100%
+pactl set-sink-mute "$BT_SINK" 0
+
+# Native PipeWire WebRTC AEC (AEC3). Playback goes straight to BT (no loopback delay).
+# buffer.play_delay only delays the AEC *reference* (not what you hear), to align with
+# the Echo Dot's Bluetooth latency. Tuned 2026-10-12: 4800/48000 (100 ms) gave best cancellation.
+MIC="${MIC:-}"   # microfone (pactl list short sources); vazio = primeiro alsa_input
+[ -z "$MIC" ] && MIC=$(pactl list short sources | awk '$2 ~ /^alsa_input/ {print $2; exit}')
+PLAY_DELAY="${PLAY_DELAY:-4800/48000}"
+CONF="$HOME/.config/echo-softvol/aec.conf"; mkdir -p "$(dirname "$CONF")"
+cat > "$CONF" <<C
+context.properties = { log.level = 2 default.clock.rate = 48000 default.clock.quantum = 1024 default.clock.min-quantum = 32 default.clock.max-quantum = 2048 }
+context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
+context.modules = [
+ { name = libpipewire-module-rt flags = [ ifexists nofail ] }
+ { name = libpipewire-module-protocol-native }
+ { name = libpipewire-module-client-node }
+ { name = libpipewire-module-adapter }
+ { name = libpipewire-module-echo-cancel args = {
+   library.name = aec/libspa-aec-webrtc
+   monitor.mode = false
+   buffer.play_delay = $PLAY_DELAY
+   aec.args = { webrtc.gain_control = false webrtc.high_pass_filter = true webrtc.noise_suppression = true }
+   capture.props = { node.name = echo-cancel-capture target.object = $MIC node.dont-reconnect = true }
+   source.props = { node.name = echo_mic node.description = Mic-sem-eco }
+   sink.props = { node.name = echo_softvol node.description = Echo }
+   playback.props = { node.name = echo-cancel-playback target.object = $BT_SINK node.dont-reconnect = true }
+ } }
+]
+C
+setsid nohup pipewire -c "$CONF" >/tmp/echo-softvol-aec.log 2>&1 9>&- &
+for _ in $(seq 1 20); do pactl list short sinks | grep -q echo_softvol && break; sleep 0.25; done
+
+pactl set-sink-volume echo_softvol 70%
+pactl set-sink-mute echo_softvol 0
+pactl set-default-source echo_mic 2>/dev/null || true

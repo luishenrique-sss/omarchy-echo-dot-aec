@@ -1,0 +1,34 @@
+#!/bin/bash
+# Automatically attaches/detaches Echo Dot soft-volume bridge on connect/disconnect
+BT_MAC="${BT_MAC:-AA:BB:CC:DD:EE:FF}"
+MAC_UNDERSCORE="${BT_MAC//:/_}"
+
+setup() {
+  $HOME/.local/bin/echo-softvol-up || true
+}
+
+teardown() {
+  $HOME/.local/bin/echo-softvol-up down || true
+}
+
+# Initial check
+if pactl list short sinks | grep -q "bluez_output\.${MAC_UNDERSCORE}"; then
+  if ! pactl list short sinks | grep -q "echo_softvol"; then
+    setup
+  fi
+fi
+
+# Subscribe to PulseAudio/PipeWire events
+pactl subscribe 2>/dev/null | while read -r event; do
+  if [[ "$event" == *"sink"* ]]; then
+    if pactl list short sinks | grep -q "bluez_output\.${MAC_UNDERSCORE}"; then
+      if ! pactl list short sinks | grep -q "echo_softvol"; then
+        setup
+      fi
+    else
+      if pactl list short sinks | grep -q "echo_softvol"; then
+        teardown
+      fi
+    fi
+  fi
+done
