@@ -29,8 +29,8 @@ L=lag(raw); a=L+SR//2; b=a+len(sig)-SR
 db=lambda x:20*np.log10(np.sqrt(np.mean(x**2))+1e-9)
 rawE,ecE=db(raw[a:b]),db(ec[a:min(b,len(ec))]); noise=db(raw[:max(L//2,1000)])
 lat=(L-lag(mon))/SR*1000
-att=rawE-ecE; cls='ausente' if ecE<noise+3 else ('leve' if att>25 else 'presente')
-print(f"{kind}: total={L/SR*1000:.0f}ms lat_rel={lat:.0f}ms raw={rawE:.1f}dB ec={ecE:.1f}dB ruido={noise:.1f}dB atenuacao={att:.1f}dB eco={cls}")
+att=rawE-ecE; cls='absent' if ecE<noise+3 else ('slight' if att>25 else 'present')
+print(f"{kind}: total={L/SR*1000:.0f}ms lat_rel={lat:.0f}ms raw={rawE:.1f}dB ec={ecE:.1f}dB noise={noise:.1f}dB attenuation={att:.1f}dB echo={cls}")
 for nm,x in [('raw',raw),('ec',ec),('mon',mon)]:
     n=1<<int(np.ceil(np.log2(len(x)+len(sig))));cc=np.abs(np.fft.irfft(np.fft.rfft(x,n)*np.conj(np.fft.rfft(sig,n)),n)[:len(x)])
     print(nm,'lag_ms',np.argmax(cc)/SR*1000,'peak/median',round(cc.max()/np.median(cc),1))

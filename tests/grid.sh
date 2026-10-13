@@ -6,6 +6,6 @@ for ms in "$@"; do
   for i in $(pactl list short sink-inputs | awk '{print $1}'); do pactl move-sink-input $i echo_softvol 2>/dev/null; done
   python3 measure.py music >/dev/null 2>&1
   for k in chirp music; do for n in $(seq $R); do
-    a=$(python3 measure.py $k 2>/dev/null | rg -o 'atenuacao=[-0-9.]+' | cut -d= -f2); echo "$ms $k $a"
+    a=$(python3 measure.py $k 2>/dev/null | rg -o 'attenuation=[-0-9.]+' | cut -d= -f2); echo "$ms $k $a"
   done; done
 done

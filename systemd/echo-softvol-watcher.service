@@ -4,7 +4,7 @@ After=pipewire.service pipewire-pulse.service wireplumber.service
 PartOf=graphical-session.target
 
 [Service]
-# Troque pelo MAC do seu alto-falante Bluetooth
+# Replace with your Bluetooth speaker MAC
 Environment=BT_MAC=AA:BB:CC:DD:EE:FF
 Type=simple
 ExecStart=%h/.local/bin/echo-softvol-watch

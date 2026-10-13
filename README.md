@@ -1,98 +1,78 @@
 # omarchy-echo-dot-aec
 
-Cancelamento de eco para quem usa um **alto-falante Bluetooth** (aqui, um Echo Dot) no Linux com **PipeWire** e conversa no Discord, Meet etc. ao mesmo tempo.
+Acoustic echo cancellation for a **Bluetooth speaker + laptop mic** on Linux with **PipeWire**, so people on a call (Discord, Meet…) don't hear your music back.
 
-![Antes e depois](docs/aec-graph.png)
+![Echo Dot → laptop mic, before/after PipeWire WebRTC AEC](docs/aec-post.png)
 
-## O problema
+Full measurements: [docs/aec-graph.png](docs/aec-graph.png) · 20 s explainer video: [docs/aec-video.mp4](docs/aec-video.mp4)
 
-A música sai do Echo Dot, o microfone do notebook capta e os seus amigos no Discord ouvem tudo de volta. A primeira "solução" era só um atraso fixo de 50 ms, que não resolvia.
+## Problem
 
-## A solução
+Audio played on a Bluetooth speaker (here an Amazon Echo Dot over A2DP) is picked up by the laptop mic and sent back into the call. A plain `pactl load-module module-echo-cancel` only removed 0.4–2.5 dB in our tests.
 
-- Um processo PipeWire **nativo** com `libpipewire-module-echo-cancel` + `aec/libspa-aec-webrtc` (WebRTC AEC3).
-- O som vai **direto** para o Bluetooth, sem loopback extra. Ou seja, nada de latência a mais no que você ouve.
-- `buffer.play_delay` atrasa **só a cópia de referência** do cancelador (não o que você ouve), para alinhar com a latência do Bluetooth A2DP.
-- **Calibração automática a cada conexão:** 3 varreduras curtas e baixas (~5 s) direto no alto-falante, correlação cruzada mic × monitor do sink, mediana → `play_delay = atraso medido − 12 ms` (limitado a 60–200 ms; se falhar, usa 120 ms). Log em `~/.local/share/echo-softvol/calib.log`. Desligue com `ECHO_CALIBRATE=0` ou force com `PLAY_DELAY=...`. Precisa de `numpy` num venv em `~/.local/share/echo-softvol/venv` com `calib/calib.py` copiado para lá.
-- Opções do WebRTC: `noise_suppression` e `high_pass_filter` ligadas, `gain_control` desligada.
-- Ficam criados dois dispositivos:
-  - saída **"Echo"** (`echo_softvol`), com volume por software;
-  - entrada **"Mic-sem-eco"** (`echo_mic`). Use esta no Discord.
-- Um serviço systemd de usuário monta tudo sozinho quando o alto-falante conecta e desmonta quando desconecta.
+## How it works
 
-Testado em: Omarchy (Arch), PipeWire 1.6.8, webrtc-audio-processing 1.3.
+- A standalone PipeWire process loads `libpipewire-module-echo-cancel` with the WebRTC backend (`aec/libspa-aec-webrtc`, AEC3).
+- Playback goes straight to the Bluetooth sink (no extra loopback, no added listening latency).
+- `buffer.play_delay` delays **only the AEC reference**, to line it up with the Bluetooth + room delay.
+- WebRTC options: `noise_suppression` and `high_pass_filter` on, `gain_control` off.
+- Two virtual devices: output **Echo** (`echo_softvol`) and input **Mic-sem-eco** (`echo_mic`, "mic without echo"). Pick that input in your call app.
+- A systemd user service sets everything up when the speaker connects and tears it down when it disconnects. A `flock` prevents duplicate instances.
 
-## Rodadas de ajuste (medidas reais, bip cronometrado + ruído tipo música)
+Tested on Omarchy (Arch), PipeWire 1.6.8, webrtc-audio-processing 1.3.
 
-| Rodada | Atenuação do eco |
-|---|---|
-| `pactl load-module module-echo-cancel` | 0,4–2,5 dB |
-| Nativo, sem atraso | 5–15 dB |
-| Nativo, +50 ms | 22 / 18,5 dB |
-| **Nativo, +100 ms (escolhido)** | **24–31 / 12–23 dB**, eco abaixo do ruído do mic |
-| Nativo, +200 ms | 8 / 12 dB |
-| Nativo, +400 ms | 3,5 / 5 dB |
-
-(bip / música). O gráfico de cima vem de uma gravação real do teste com música: microfone cru × microfone depois do AEC.
-
-
-## Rodada 2: varredura 20 Hz–20 kHz + grade de atrasos (12/10/2026)
-
-- **Atraso real Echo Dot (Bluetooth + sala → mic):** 5 varreduras log de 2 s, deconvolução → **132,5 ± 0,5 ms**. A calibração curta (0,5 s) dá 116–169 ms entre medições, por isso usa mediana de 3.
-- **Resposta da sala:** forte em 100–300 Hz (+8 a +13 dB vs 1 kHz), cai −14 dB em 4 kHz e −20 dB em 16 kHz; abaixo de 40 Hz o Echo quase não toca.
-- **Grade de `play_delay`** (0–200 ms de 20 em 20, fino de 5 em 5 entre 100 e 135; 3–8 repetições; média ± desvio, bip / música):
-
-| play_delay | bip (dB) | música (dB) |
-|---|---|---|
-| 0 ms | 27,0 ± 3,5 | 19,4 ± 0,4 |
-| 40 ms | 22,7 ± 3,1 | 22,4 ± 2,0 |
-| 80 ms | 21,4 ± 2,5 | 25,0 ± 0,4 |
-| 100 ms (antigo) | 23,2 ± 4,4 | 22,3 ± 3,9 |
-| 115 ms | 26,9 ± 1,7 | 23,9 ± 2,2 |
-| **120 ms (novo fixo)** | **23,6 ± 5,3** | **24,7 ± 4,3** |
-| 125 ms | 29,1 ± 1,3 | 20,5 ± 3,3 |
-| 130 ms | 16,5 ± 9,5 | 12,1 ± 8,5 |
-| 160 ms | 24,3 ± 1,3 | 25,2 ± 0,8 |
-| 200 ms | 25,7 ± 2,5 | 25,2 ± 1,5 |
-
-**Conclusão honesta:** entre 0 e 200 ms a diferença fica dentro do ruído da medição (~20–27 dB). O AEC3 do WebRTC tem estimador de atraso interno e se vira sozinho nessa faixa; o ganho de trocar 100 → 120 ms é pequeno. O limite agora é físico: depois do AEC o eco já fica no nível do ruído do microfone, então a atenuação medida depende mais de quão alto o Echo toca do que do atraso.
-
-## Instalação
+## Install
 
 ```bash
 git clone https://github.com/luishenrique-sss/omarchy-echo-dot-aec
 cd omarchy-echo-dot-aec
-bluetoothctl devices                        # anote o MAC do alto-falante
-pactl list short sources | grep alsa_input  # anote o nome do microfone
+bluetoothctl devices                        # note the speaker MAC
+pactl list short sources | grep alsa_input  # note the mic name (optional)
 
 mkdir -p ~/.local/bin ~/.config/systemd/user
 cp bin/* ~/.local/bin/
 cp systemd/echo-softvol-watcher.service ~/.config/systemd/user/
-# edite BT_MAC (e, se quiser, MIC) em ~/.local/bin/echo-softvol-up e no .service
+# set BT_MAC (and optionally MIC) in ~/.local/bin/echo-softvol-up and the .service
 systemctl --user daemon-reload
 systemctl --user enable --now echo-softvol-watcher.service
 ```
 
-Depois, no Discord, escolha **Mic-sem-eco** como entrada. Como saída, use **Echo**.
+## Calibration and timing
 
-Se a latência do seu alto-falante for outra, teste valores diferentes de atraso:
-`PLAY_DELAY=2400/48000 ~/.local/bin/echo-softvol-up`, e meça com `tests/measure.py` (veja `tests/`).
+On each connect the script plays 3 short, quiet sweeps (~5 s total) on the speaker. It cross-correlates the mic with the sink monitor and sets `play_delay = median measured delay − 12 ms`, clamped to 60–200 ms. If that fails, it falls back to 120 ms. Results are logged to `~/.local/share/echo-softvol/calib.log`.
 
-## Reverter
+```bash
+mkdir -p ~/.local/share/echo-softvol && cp calib/calib.py ~/.local/share/echo-softvol/
+uv venv ~/.local/share/echo-softvol/venv && uv pip install --python ~/.local/share/echo-softvol/venv/bin/python numpy
+```
+
+Skip calibration with `ECHO_CALIBRATE=0`, or force a value with `PLAY_DELAY=5760/48000` (120 ms).
+
+Measured timing on this setup:
+- Bluetooth + room delay from 5 log sweeps: **132.5 ± 0.5 ms** (deconvolution).
+- The short on-connect calibration reads 116–169 ms across single runs, so it uses the median of 3.
+
+## Results
+
+Measured with `tests/sweep.py` and `tests/grid.sh` (chirp and music-like noise, `buffer.play_delay` 0–200 ms):
+
+| | mean ± SD | median | n |
+|---|---|---|---|
+| chirp | 23.1 ± 6.4 dB | 25.0 dB | 73 |
+| music-like noise | 22.3 ± 4.9 dB | 23.2 dB | 73 |
+
+- Between 0 and 200 ms the delay setting made no difference larger than the run-to-run spread. AEC3 estimates the delay internally.
+- In the recording shown above, the mic level went from −37.9 dBFS to −57.5 dBFS (19.6 dB). The mic noise floor without playback was −49.3 dBFS.
+
+**Caveat:** noise suppression was **on** in all runs, so these numbers are echo cancellation **plus** noise suppression. Echo-only attenuation has not been measured yet.
+
+## Revert
 
 ```bash
 systemctl --user disable --now echo-softvol-watcher.service
 ~/.local/bin/echo-softvol-up down
 rm ~/.local/bin/echo-softvol-up ~/.local/bin/echo-softvol-watch ~/.config/systemd/user/echo-softvol-watcher.service
-rm -rf ~/.config/echo-softvol
+rm -rf ~/.config/echo-softvol ~/.local/share/echo-softvol
 ```
-
-O guia completo está em [`docs/Guia_Eco_Alexa_Omarchy.pdf`](docs/Guia_Eco_Alexa_Omarchy.pdf).
-
----
-
-### English summary
-
-This setup fixes Bluetooth speaker echo on Linux/PipeWire. When music plays on a Bluetooth speaker (here an Echo Dot), the laptop mic picks it up and Discord friends hear it back. The fix is a standalone PipeWire instance running `module-echo-cancel` with the WebRTC AEC3 backend. Playback goes straight to the BT sink, and `buffer.play_delay` (auto-calibrated on each connect from a short sweep, measured BT+room delay 132.5 ± 0.5 ms, set to delay − 12 ms, fallback 120 ms) aligns only the AEC reference. A 0–200 ms delay grid showed differences within measurement noise (~20–27 dB), since AEC3 estimates delay internally. Measured echo attenuation is 24–31 dB on chirps and 12–23 dB on music, versus 0.4–2.5 dB with the plain `pactl` module. A systemd user service wires it up automatically on connect. Install and revert steps are above.
 
 License: MIT.

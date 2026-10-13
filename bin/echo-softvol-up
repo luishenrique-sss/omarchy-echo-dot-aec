@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BT_MAC="${BT_MAC:-AA:BB:CC:DD:EE:FF}"   # MAC do seu alto-falante (bluetoothctl devices)
+BT_MAC="${BT_MAC:-AA:BB:CC:DD:EE:FF}"   # your speaker MAC (bluetoothctl devices)
 MAC_UNDERSCORE="${BT_MAC//:/_}"
 CARD="bluez_card.${MAC_UNDERSCORE}"
 
@@ -63,8 +63,8 @@ pactl set-sink-mute "$BT_SINK" 0
 
 # Native PipeWire WebRTC AEC (AEC3). Playback goes straight to BT (no loopback delay).
 # buffer.play_delay only delays the AEC *reference* (not what you hear), to align with
-# the Echo Dot's Bluetooth latency. Re-tuned 2026-10-12 with sweep + delay grid (see calib below).
-MIC="${MIC:-}"   # microfone (pactl list short sources); vazio = primeiro alsa_input
+# the speaker Bluetooth latency. Re-tuned 2026-10-12 with sweep + delay grid (see calib below).
+MIC="${MIC:-}"   # mic source (pactl list short sources); empty = first alsa_input
 [ -z "$MIC" ] && MIC=$(pactl list short sources | awk '$2 ~ /^alsa_input/ {print $2; exit}')
 # Quick calibration on each (re)connect: 3 short faint sweeps straight to the BT sink,
 # cross-correlate mic vs sink monitor, median -> play_delay = measured + OFFSET_MS.
