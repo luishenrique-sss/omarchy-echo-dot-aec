@@ -1,3 +1,4 @@
+# Example of the generated ~/.config/echo-softvol/aec.conf (play_delay 120 ms). echo-softvol-up writes this file itself.
 context.properties = { log.level = 2 default.clock.rate = 48000 default.clock.quantum = 1024 default.clock.min-quantum = 32 default.clock.max-quantum = 2048 }
 context.spa-libs = { audio.convert.* = audioconvert/libspa-audioconvert support.* = support/libspa-support }
 context.modules = [
@@ -8,10 +9,10 @@ context.modules = [
  { name = libpipewire-module-echo-cancel args = {
    library.name = aec/libspa-aec-webrtc
    monitor.mode = false
-   buffer.play_delay = 4800/48000
+   buffer.play_delay = 5760/48000
    aec.args = { webrtc.gain_control = false webrtc.high_pass_filter = true webrtc.noise_suppression = true }
-   capture.props = { node.name = echo-cancel-capture target.object = SEU_MICROFONE node.dont-reconnect = true }
-   source.props = { node.name = echo_mic node.description = Mic-sem-eco }
+   capture.props = { node.name = echo-cancel-capture target.object = YOUR_MIC_SOURCE node.dont-reconnect = true }
+   source.props = { node.name = echo_mic node.description = "Echo-cancelled mic" }
    sink.props = { node.name = echo_softvol node.description = Echo }
    playback.props = { node.name = echo-cancel-playback target.object = bluez_output.AA_BB_CC_DD_EE_FF.1 node.dont-reconnect = true }
  } }

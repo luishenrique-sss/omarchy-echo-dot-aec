@@ -15,7 +15,7 @@ def w(p,x):
 def r(p):
     with wave.open(p) as f: return np.frombuffer(f.readframes(f.getnframes()),'<i2').reshape(-1,f.getnchannels())[:,0]/32768
 w('play.wav',sig)
-M=os.environ.get('MIC','SEU_MICROFONE')
+M=os.environ.get('MIC','YOUR_MIC_SOURCE')
 dur=len(sig)/SR+1.0
 recs=[subprocess.Popen(["env","PIPEWIRE_LATENCY=256/48000",'timeout',str(dur+0.6),'pw-record']+x+['--rate','48000','--channels','1','--format','s16',o]) for x,o in [(['--target',M],'raw.wav'),(['--target',os.environ.get('SRC','echo_mic')],'ec.wav'),(['-P','{ stream.capture.sink=true }','--target',os.environ.get('BT_SINK','bluez_output.AA_BB_CC_DD_EE_FF.1')],'mon.wav')]]
 time.sleep(0.6); subprocess.run(['pw-play','--target',os.environ.get('SNK','echo_softvol'),'play.wav'])

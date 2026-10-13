@@ -1,11 +1,12 @@
 [Unit]
-Description=Echo Dot soft-volume auto-wiring daemon
+Description=Bluetooth speaker echo-cancel auto-wiring daemon
 After=pipewire.service pipewire-pulse.service wireplumber.service
+# On Omarchy/uwsm, graphical-session.target is reached when the Hyprland session starts.
 PartOf=graphical-session.target
 
 [Service]
-# Replace with your Bluetooth speaker MAC
-Environment=BT_MAC=AA:BB:CC:DD:EE:FF
+# BT_MAC=... and optionally MIC=... (created by install.sh)
+EnvironmentFile=%h/.config/echo-softvol/env
 Type=simple
 ExecStart=%h/.local/bin/echo-softvol-watch
 Restart=always

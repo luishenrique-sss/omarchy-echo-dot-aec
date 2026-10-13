@@ -16,37 +16,54 @@ Audio played on a Bluetooth speaker (here an Amazon Echo Dot over A2DP) is picke
 - Playback goes straight to the Bluetooth sink (no extra loopback, no added listening latency).
 - `buffer.play_delay` delays **only the AEC reference**, to line it up with the Bluetooth + room delay.
 - WebRTC options: `noise_suppression` and `high_pass_filter` on, `gain_control` off.
-- Two virtual devices: output **Echo** (`echo_softvol`) and input **Mic-sem-eco** (`echo_mic`, "mic without echo"). Pick that input in your call app.
+- Two virtual devices: output **Echo** (`echo_softvol`) and input **Echo-cancelled mic** (`echo_mic`). Pick that input in your call app.
 - A systemd user service sets everything up when the speaker connects and tears it down when it disconnects. A `flock` prevents duplicate instances.
 
-Tested on Omarchy (Arch), PipeWire 1.6.8, webrtc-audio-processing 1.3.
+
+## Prerequisites
+
+```bash
+sudo pacman -S --needed pipewire pipewire-pulse wireplumber bluez bluez-utils webrtc-audio-processing util-linux python python-numpy
+```
+
+(`uv` works instead of `python-numpy`.) Tested on Omarchy (Arch, Hyprland via uwsm), kernel 7.2.5, PipeWire 1.6.8, BlueZ 5.87, webrtc-audio-processing 1.3. Check yours with `uname -r`, `pipewire --version`, `bluetoothctl --version`.
+
+Scope: **one** Bluetooth speaker per install.
 
 ## Install
 
 ```bash
 git clone https://github.com/luishenrique-sss/omarchy-echo-dot-aec
 cd omarchy-echo-dot-aec
-bluetoothctl devices                        # note the speaker MAC
-pactl list short sources | grep alsa_input  # note the mic name (optional)
+bluetoothctl devices                        # speaker MAC
+pactl list short sources | grep alsa_input  # mic name (optional; default = first alsa_input)
+BT_MAC=AA:BB:CC:DD:EE:FF MIC=alsa_input.YOUR_MIC_SOURCE ./install.sh
+```
 
-mkdir -p ~/.local/bin ~/.config/systemd/user
-cp bin/* ~/.local/bin/
-cp systemd/echo-softvol-watcher.service ~/.config/systemd/user/
-# set BT_MAC (and optionally MIC) in ~/.local/bin/echo-softvol-up and the .service
-systemctl --user daemon-reload
-systemctl --user enable --now echo-softvol-watcher.service
+`install.sh` copies the scripts to `~/.local/bin`, writes `~/.config/echo-softvol/env` (read by the service via `EnvironmentFile`), installs calibration, then enables `echo-softvol-watcher.service` (a user service tied to `graphical-session.target`, which uwsm starts on Omarchy).
+
+Then:
+- In your call app (Discord, Meet…) pick the input **Echo-cancelled mic**.
+- Play audio to the output **Echo** (the default after setup). Audio sent straight to the Bluetooth sink is not cancelled.
+- Your previous default mic and speaker volume are saved in `~/.local/state/echo-softvol/` and restored on disconnect/uninstall.
+
+[`config/aec.conf.example`](config/aec.conf.example) shows the PipeWire config the script generates.
+
+## Verify (for humans and agents)
+
+```bash
+systemctl --user status echo-softvol-watcher.service
+pactl list short sources | grep echo_mic
+pactl list short sinks   | grep echo_softvol
+tail ~/.local/share/echo-softvol/calib.log
+cat /tmp/echo-softvol-aec.log
 ```
 
 ## Calibration and timing
 
-On each connect the script plays 3 short, quiet sweeps (~5 s total) on the speaker. It cross-correlates the mic with the sink monitor and sets `play_delay = median measured delay − 12 ms`, clamped to 60–200 ms. If that fails, it falls back to 120 ms. Results are logged to `~/.local/share/echo-softvol/calib.log`.
+**Heads-up:** on each connect the script plays 3 short, quiet sweeps (~5 s total) on the speaker, at its current volume (before the speaker is set to 100%). It cross-correlates the mic with the sink monitor and sets `play_delay = median measured delay − 12 ms`, clamped to 60–200 ms. If that fails, it falls back to 120 ms. Results are logged to `~/.local/share/echo-softvol/calib.log`.
 
-```bash
-mkdir -p ~/.local/share/echo-softvol && cp calib/calib.py ~/.local/share/echo-softvol/
-uv venv ~/.local/share/echo-softvol/venv && uv pip install --python ~/.local/share/echo-softvol/venv/bin/python numpy
-```
-
-Skip calibration with `ECHO_CALIBRATE=0`, or force a value with `PLAY_DELAY=5760/48000` (120 ms).
+Skip calibration with `ECHO_CALIBRATE=0` in `~/.config/echo-softvol/env`, or force a value with `PLAY_DELAY=5760/48000` (120 ms).
 
 Measured timing on this setup:
 - Bluetooth + room delay from 5 log sweeps: **132.5 ± 0.5 ms** (deconvolution).
@@ -58,7 +75,7 @@ Measured timing on this setup:
 
 ## Results
 
-Measured with `tests/sweep.py` and `tests/grid.sh` (chirp and music-like noise, `buffer.play_delay` 0–200 ms):
+Measured with `tests/sweep.py` and `tests/grid.sh` (dev-only, not needed to use the bridge; they play loud test sounds) (chirp and music-like noise, `buffer.play_delay` 0–200 ms):
 
 | | mean ± SD | median | n |
 |---|---|---|---|
@@ -70,13 +87,12 @@ Measured with `tests/sweep.py` and `tests/grid.sh` (chirp and music-like noise, 
 
 **Caveat:** noise suppression was **on** in all runs, so these numbers are echo cancellation **plus** noise suppression. Echo-only attenuation has not been measured yet.
 
-## Revert
+## Uninstall
 
 ```bash
-systemctl --user disable --now echo-softvol-watcher.service
-~/.local/bin/echo-softvol-up down
-rm ~/.local/bin/echo-softvol-up ~/.local/bin/echo-softvol-watch ~/.config/systemd/user/echo-softvol-watcher.service
-rm -rf ~/.config/echo-softvol ~/.local/share/echo-softvol
+./uninstall.sh
 ```
 
-License: MIT.
+It stops the service, restores your previous default mic and speaker volume, and removes the scripts, config, state, calibration, `/tmp/echo-softvol-aec.log` and `$XDG_RUNTIME_DIR/echo-softvol.lock`.
+
+License: [MIT](LICENSE).

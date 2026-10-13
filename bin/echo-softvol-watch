@@ -1,34 +1,22 @@
 #!/bin/bash
-# Automatically attaches/detaches Echo Dot soft-volume bridge on connect/disconnect
+# Attaches/detaches the echo-cancel bridge when the Bluetooth speaker connects/disconnects
 BT_MAC="${BT_MAC:-AA:BB:CC:DD:EE:FF}"
 MAC_UNDERSCORE="${BT_MAC//:/_}"
+UP="$HOME/.local/bin/echo-softvol-up"
 
-setup() {
-  $HOME/.local/bin/echo-softvol-up || true
-}
-
-teardown() {
-  $HOME/.local/bin/echo-softvol-up down || true
-}
+has_bt()  { pactl list short sinks | grep -q "bluez_output\.${MAC_UNDERSCORE}"; }
+has_aec() { pactl list short sinks | grep -q "echo_softvol"; }
 
 # Initial check
-if pactl list short sinks | grep -q "bluez_output\.${MAC_UNDERSCORE}"; then
-  if ! pactl list short sinks | grep -q "echo_softvol"; then
-    setup
-  fi
-fi
+if has_bt && ! has_aec; then "$UP" || true; fi
 
-# Subscribe to PulseAudio/PipeWire events
+# Subscribe to PipeWire (pulse) events; react only to sink add/remove
 pactl subscribe 2>/dev/null | while read -r event; do
-  if [[ "$event" == *"sink"* ]]; then
-    if pactl list short sinks | grep -q "bluez_output\.${MAC_UNDERSCORE}"; then
-      if ! pactl list short sinks | grep -q "echo_softvol"; then
-        setup
-      fi
+  if [[ "$event" == *"on sink #"* ]]; then
+    if has_bt; then
+      has_aec || "$UP" || true
     else
-      if pactl list short sinks | grep -q "echo_softvol"; then
-        teardown
-      fi
+      has_aec && { "$UP" down || true; }
     fi
   fi
 done

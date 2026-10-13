@@ -1,3 +1,5 @@
+# Dev-only benchmark: plays N log sweeps on the speaker. Set MIC=<source name>.
+import os
 import numpy as np, wave, subprocess, time, sys, json
 SR=48000; T=2.0; f1,f2=20,20000; N=int(sys.argv[1]) if len(sys.argv)>1 else 5
 t=np.arange(int(SR*T))/SR; K=T/np.log(f2/f1)
@@ -9,7 +11,7 @@ def w(p,x):
 def r(p):
     with wave.open(p) as f: return np.frombuffer(f.readframes(f.getnframes()),'<i2').reshape(-1,f.getnchannels())[:,0]/32768
 w('sw_play.wav',sig)
-M='alsa_input.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__Mic1__source'; B=subprocess.check_output("pactl list short sinks|awk '/bluez_output/{print $2;exit}'",shell=True,text=True).strip()
+M=os.environ.get('MIC','YOUR_MIC_SOURCE'); B=subprocess.check_output("pactl list short sinks|awk '/bluez_output/{print $2;exit}'",shell=True,text=True).strip()
 dur=len(sig)/SR+1.5
 recs=[subprocess.Popen(["env","PIPEWIRE_LATENCY=256/48000",'timeout',str(dur),'pw-record']+x+['--rate','48000','--channels','1','--format','s16',o]) for x,o in [(['--target',M],'sw_raw.wav'),(['--target','echo_mic'],'sw_ec.wav'),(['-P','{ stream.capture.sink=true }','--target',B],'sw_mon.wav')]]
 time.sleep(0.6); subprocess.run(['pw-play','--target','echo_softvol','sw_play.wav'])
