@@ -63,10 +63,28 @@ pactl set-sink-mute "$BT_SINK" 0
 
 # Native PipeWire WebRTC AEC (AEC3). Playback goes straight to BT (no loopback delay).
 # buffer.play_delay only delays the AEC *reference* (not what you hear), to align with
-# the Echo Dot's Bluetooth latency. Tuned 2026-10-12: 4800/48000 (100 ms) gave best cancellation.
+# the Echo Dot's Bluetooth latency. Re-tuned 2026-10-12 with sweep + delay grid (see calib below).
 MIC="${MIC:-}"   # microfone (pactl list short sources); vazio = primeiro alsa_input
 [ -z "$MIC" ] && MIC=$(pactl list short sources | awk '$2 ~ /^alsa_input/ {print $2; exit}')
-PLAY_DELAY="${PLAY_DELAY:-4800/48000}"
+# Quick calibration on each (re)connect: 3 short faint sweeps straight to the BT sink,
+# cross-correlate mic vs sink monitor, median -> play_delay = measured + OFFSET_MS.
+# Sweep 2026-10-12: measured ~132 ms, best fixed play_delay 120 ms -> OFFSET_MS=-12.
+# Fallback 120 ms. Skip with PLAY_DELAY=... or ECHO_CALIBRATE=0.
+FIXED_MS=120; OFFSET_MS=-12; MIN_MS=60; MAX_MS=200
+CAL="$HOME/.local/share/echo-softvol"
+if [ -z "${PLAY_DELAY:-}" ]; then
+  MS=$FIXED_MS
+  if [ "${ECHO_CALIBRATE:-1}" = 1 ] && [ -x "$CAL/venv/bin/python" ]; then
+    vals=()
+    for _ in 1 2 3; do v=$(timeout 6 "$CAL/venv/bin/python" "$CAL/calib.py" "$BT_SINK" "$MIC" 2>/dev/null 9>&- || true); [ -n "$v" ] && vals+=("$v"); done
+    if [ ${#vals[@]} -ge 2 ]; then
+      med=$(printf '%s\n' "${vals[@]}" | sort -n | awk '{a[NR]=$1} END{print a[int((NR+1)/2)]}')
+      MS=$((med + OFFSET_MS)); (( MS < MIN_MS )) && MS=$MIN_MS; (( MS > MAX_MS )) && MS=$MAX_MS
+    fi
+    echo "$(date '+%F %T') measured=[${vals[*]}] play_delay=${MS}ms" >> "$CAL/calib.log"
+  fi
+  PLAY_DELAY="$((MS*48))/48000"
+fi
 CONF="$HOME/.config/echo-softvol/aec.conf"; mkdir -p "$(dirname "$CONF")"
 cat > "$CONF" <<C
 context.properties = { log.level = 2 default.clock.rate = 48000 default.clock.quantum = 1024 default.clock.min-quantum = 32 default.clock.max-quantum = 2048 }
