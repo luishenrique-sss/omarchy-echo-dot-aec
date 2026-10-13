@@ -51,6 +51,10 @@ Skip calibration with `ECHO_CALIBRATE=0`, or force a value with `PLAY_DELAY=5760
 Measured timing on this setup:
 - Bluetooth + room delay from 5 log sweeps: **132.5 ± 0.5 ms** (deconvolution).
 - The short on-connect calibration reads 116–169 ms across single runs, so it uses the median of 3.
+- On-connect calibration: ~5 s (3 quiet sweeps).
+- Full benchmark (`tests/sweep.py` + `tests/grid.sh`): ~6 s per measurement; 151 measurements took ~16 min.
+- CPU: the AEC PipeWire process (WebRTC AEC3 + noise suppression, 48 kHz) uses ~25–30% of one core (`top`, 3 samples), ~0.1% RAM (15 MB RSS).
+- All numbers measured on one machine (Intel i5-13450HX, 16 threads, Omarchy). Expect different values elsewhere.
 
 ## Results
 
